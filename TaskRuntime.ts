@@ -1,20 +1,17 @@
-import { TaskDefinition, TaskSnapshot, t_g_TaskDef } from ".";
-import { PauseController } from "./PauseController";
+import { TaskSnapshot, t_g_TaskDef } from "./index.js";
 
 export class TaskRuntime {
     private readonly tasks = new Map<string, t_g_TaskDef>();
     private readonly states = new Map<string, TaskSnapshot>();
-   // private readonly pauseController = new PauseController();
     private readonly abortController = new AbortController();
     private readonly maxConcurrency: number;
-    private active_tid: number | null = null;
 
     constructor(maxConcurrency = 1) {
         if (!Number.isInteger(maxConcurrency) || maxConcurrency < 1) {
             throw new RangeError("maxConcurrency must be a positive integer");
         }
         this.maxConcurrency = maxConcurrency;
-    };
+    }
 
     addTask(task: t_g_TaskDef) {
         if (this.tasks.has(task.id)) {
@@ -26,15 +23,6 @@ export class TaskRuntime {
             id: task.id,
             status: "pending"
         })
-    };
-
-    pause(): void {
-        // pause the execution of tasks
-        // finish processing the actual idx, then pause()
-    }
-
-    resume(): void {
-        // resume processing taks
     }
 
     snapshots(): TaskSnapshot[] {
@@ -58,43 +46,52 @@ export class TaskRuntime {
     }
 
     /** checks if task is ready before execution */
-    private isReady(task: TaskDefinition): boolean {
+    private isReady(task: t_g_TaskDef): boolean {
         const state = this.states.get(task.id);
         return state?.status === "pending" && (task.dependsOn ?? []).every(id => this.states.get(id)?.status === "completed");
     }
 
-    /** execute a task using task.run() */
-    private async execute(task : t_g_TaskDef) : Promise<void> {
-        
-        const state = this.states.get(task.id)!
-        this.states.set(task.id, {...state, status : "running"})
+    private async execute(task: t_g_TaskDef): Promise<void> {
+        this.states.set(task.id, { ...this.states.get(task.id)!, status: "running" });
         try {
-            await task.run({
-                signal : this.abortController.signal,
-               
-                
-            })
-            this.states.set(task.id, {... state, status : "completed"})
-        } catch(err) {
-          this.states.set(task.id, {... state, status : "completed"})
-          state.error = err;
+            await task.run({ signal: this.abortController.signal });
+            this.states.set(task.id, { ...this.states.get(task.id)!, status: "completed" });
+        } catch (error) {
+            this.states.set(task.id, { ...this.states.get(task.id)!, status: "failed", error });
         }
     }
 
     /** @brief runtime function, */
     private blockTasksWithFailedDependencies(): void {
-
+        for (const task of this.tasks.values()) {
+            const state = this.states.get(task.id)!;
+            const dependencies = (task.dependsOn ?? []).map(id => this.states.get(id)!);
+            if (state.status === "pending" && dependencies.some(dep => dep.status === "failed" || dep.status === "blocked")) {
+                this.states.set(task.id, { ...state, status: "blocked" });
+            }
+        }
     }
-    async run(): Promise<void> {
+    async run(): Promise<TaskSnapshot[]> {
         this.validateDependencies();
-
-        const running = null; // this should take a ref of the running pcess
+        const running = new Set<Promise<void>>();
 
         while([...this.states.values()].some(s => 
             s.status === "pending" || s.status === "running"))
         {
+            this.blockTasksWithFailedDependencies();
+            for (const task of this.tasks.values()) {
+                if (running.size >= this.maxConcurrency || !this.isReady(task)) continue;
+                const execution = this.execute(task);
+                running.add(execution);
+                execution.finally(() => running.delete(execution));
+            }
 
+            if (running.size === 0) {
+                throw new Error("No runnable tasks remain; check task dependencies");
+            }
+            await Promise.race(running);
         }
 
+        return this.snapshots();
     }
 }

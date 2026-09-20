@@ -1,3 +1,6 @@
+/**
+ * pause and resume the execution of a Runtime
+ */
 export class PauseController {
     private resumePromise: Promise<void> | null = null;
     private resolveResume: (() => void) | null = null;

@@ -1,30 +1,27 @@
-import { TaskRuntime } from "..";
+import { TaskRuntime } from "../TaskRuntime";
 
 const events = [];
 const runtime = new TaskRuntime(2);
 
 runtime.addTask({
     id: "ticket",
-    description: "getting a ticket",
+    
     run: async () => { events.push("ticket"); }
 });
 
 runtime.addTask({
     id: "birthcert",
-    description: "receive a birthcert",
     run: async () => { events.push("birthcert"); }
 });
 
 runtime.addTask({
     id: "sign",
-    description: "sign a doc",
     dependsOn: ["ticket"],
     run: async () => { events.push("sign"); }
 });
 
 runtime.addTask({
     id: "home",
-    description: "go back home",
     dependsOn: ["birthcert", "sign"],
     run: async () => { events.push("home"); }
 });
@@ -34,7 +31,7 @@ const run = runtime.run();
 
 if (events.length !== 0) throw new Error("paused runtime started working");
 
-console.log(runtime.snapshot());
+console.log(runtime.snapshots());
 runtime.resume();
 const result = await run;
 
